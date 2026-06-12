@@ -8,6 +8,7 @@ SUMO routes, or demand.
 from __future__ import annotations
 
 import argparse
+import colorsys
 import csv
 import json
 import subprocess
@@ -15,68 +16,37 @@ from collections import defaultdict
 from pathlib import Path
 
 
-MODE_STATUS_NAME = {
-    "final": "FINAL",
-    "debug": "DEBUG",
-    "review": "REVIEW",
-}
-
-
 def read_csv(path: Path) -> list[dict]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
-def normalized_raw_track_id(row: dict) -> str:
-    raw_track_id = row.get("raw_track_id") or row.get("track_id", "")
-    if raw_track_id.startswith("mot_"):
-        return raw_track_id
-    return f"mot_{int(float(raw_track_id)):04d}"
-
-
-def detection_label(row: dict, mode: str) -> str:
+def final_detection_label(row: dict) -> str:
     logical_id = row.get("logical_vehicle_id", "").strip()
-    raw_track_id = normalized_raw_track_id(row)
-    class_name = row.get("class_name", "")
-    confidence = float(row.get("confidence") or 0.0)
-    if mode == "final":
-        return f"{logical_id} FINAL {class_name} {confidence:.2f}"
-    if mode == "debug":
-        return f"{logical_id}/{raw_track_id} DEBUG {class_name} {confidence:.2f}"
-    if mode == "review":
-        status = row.get("association_status", "")
-        review_name = "DUP" if status == "duplicate_suppressed" else ("LINK?" if status == "ambiguous_review" else "REVIEW")
-        return f"{logical_id}/{raw_track_id} {review_name} {class_name} {confidence:.2f}"
-    raise ValueError(f"Unknown logical video mode: {mode}")
+    if not logical_id:
+        raise ValueError("Final render row is missing logical_vehicle_id")
+    return logical_id
 
 
-def rows_by_frame(rows: list[dict], mode: str) -> dict[int, list[dict]]:
+def rows_by_frame(rows: list[dict]) -> dict[int, list[dict]]:
     grouped: dict[int, list[dict]] = defaultdict(list)
     for row in rows:
-        status = row.get("association_status", "")
-        if mode == "final":
-            if status != "accepted":
-                continue
-            if row.get("final_gate_status") and row.get("final_gate_status") != "AUTO_KEEP":
-                continue
-        if mode == "debug" and status == "duplicate_suppressed":
-            continue
         grouped[int(float(row["frame_id"]))].append(row)
     return grouped
 
 
-def color_for_id(identifier: str) -> tuple[int, int, int]:
-    value = sum((idx + 1) * ord(char) for idx, char in enumerate(identifier))
-    return (50 + (value * 47) % 180, 50 + (value * 83) % 180, 50 + (value * 131) % 180)
+def final_color_map(rows: list[dict]) -> dict[str, tuple[int, int, int]]:
+    identifiers = sorted({final_detection_label(row) for row in rows})
+    colors: dict[str, tuple[int, int, int]] = {}
+    for index, identifier in enumerate(identifiers):
+        hue = ((index * 137.508) % 360.0) / 360.0
+        red, green, blue = colorsys.hsv_to_rgb(hue, 0.82, 0.95)
+        colors[identifier] = (int(red * 255), int(green * 255), int(blue * 255))
+    return colors
 
 
-def style_for_row(row: dict, mode: str) -> tuple[int, int, int]:
-    status = row.get("association_status", "")
-    if mode == "review" and status == "duplicate_suppressed":
-        return (230, 50, 45)
-    if mode == "review" and status == "ambiguous_review":
-        return (245, 170, 35)
-    return color_for_id(row.get("logical_vehicle_id", "lv_unknown"))
+def style_for_row(row: dict, colors: dict[str, tuple[int, int, int]]) -> tuple[int, int, int]:
+    return colors[final_detection_label(row)]
 
 
 def load_font(size: int):
@@ -108,13 +78,13 @@ def draw_label(draw, text: str, x: int, y: int, color: tuple[int, int, int], fon
     draw.text((left + 7, top + 5), text, fill=(255, 255, 255), font=font)
 
 
-def draw_detection(draw, row: dict, mode: str, font) -> None:
-    color = style_for_row(row, mode)
+def draw_detection(draw, row: dict, colors: dict[str, tuple[int, int, int]], font) -> None:
+    color = style_for_row(row, colors)
     x1, y1, x2, y2 = [int(round(float(row[key]))) for key in ("x1", "y1", "x2", "y2")]
-    width = 5 if mode == "final" else 3
+    width = 5
     for offset in range(width):
         draw.rectangle((x1 - offset, y1 - offset, x2 + offset, y2 + offset), outline=color)
-    draw_label(draw, detection_label(row, mode), x1, max(24, y1 - 5), color, font)
+    draw_label(draw, final_detection_label(row), x1, max(24, y1 - 5), color, font)
 
 
 def probe_video(clip_path: Path) -> tuple[int, int]:
@@ -165,18 +135,18 @@ def probe_video_frame_count(clip_path: Path) -> int:
     return int(count)
 
 
-def render_logical_vehicle_video(
+def render_final_logical_vehicle_video(
     clip_path: Path,
     logical_rows: list[dict],
     output_path: Path,
-    mode: str,
     fps: float = 50.0,
     start_frame: int = 0,
     end_frame: int | None = None,
 ) -> int:
     from PIL import Image, ImageDraw
 
-    grouped = rows_by_frame(logical_rows, mode)
+    grouped = rows_by_frame(logical_rows)
+    colors = final_color_map(logical_rows)
     width, height = probe_video(clip_path)
     frame_bytes = width * height * 3
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,7 +188,7 @@ def render_logical_vehicle_video(
     )
     if decode.stdout is None or encode.stdin is None:
         raise RuntimeError("Failed to open ffmpeg raw-video pipes")
-    label_font = load_font(24 if mode == "final" else 18)
+    label_font = load_font(24)
     frame_id = 0
     written = 0
     while True:
@@ -236,7 +206,7 @@ def render_logical_vehicle_video(
         image = Image.frombytes("RGB", (width, height), raw_frame)
         draw = ImageDraw.Draw(image)
         for row in grouped.get(frame_id, []):
-            draw_detection(draw, row, mode, label_font)
+            draw_detection(draw, row, colors, label_font)
         encode.stdin.write(image.tobytes())
         frame_id += 1
         written += 1
@@ -254,25 +224,23 @@ def render_logical_vehicle_video(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--clip", required=True)
-    parser.add_argument("--logical-tracks", required=True)
+    parser.add_argument("--final-tracks", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--mode", choices=["final", "debug", "review"], required=True)
     parser.add_argument("--fps", type=float, default=50.0)
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--end-frame", type=int)
     args = parser.parse_args()
 
-    rows = read_csv(Path(args.logical_tracks))
-    written = render_logical_vehicle_video(
+    rows = read_csv(Path(args.final_tracks))
+    written = render_final_logical_vehicle_video(
         clip_path=Path(args.clip),
         logical_rows=rows,
         output_path=Path(args.output),
-        mode=args.mode,
         fps=args.fps,
         start_frame=args.start_frame,
         end_frame=args.end_frame,
     )
-    print(f"mode={args.mode}")
+    print("render=final")
     print(f"frames_written={written}")
     print(f"output={args.output}")
 

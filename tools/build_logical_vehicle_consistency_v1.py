@@ -11,7 +11,7 @@ import argparse
 import math
 from pathlib import Path
 
-from build_logical_vehicle_id_video import probe_video_frame_count, render_logical_vehicle_video
+from build_logical_vehicle_id_video import probe_video_frame_count, render_final_logical_vehicle_video
 from logical_vehicle_consistency import (
     build_logical_vehicle_consistency,
     read_csv,
@@ -22,8 +22,6 @@ from logical_vehicle_consistency import (
 def logical_video_output_paths(output_dir: Path) -> dict[str, Path]:
     return {
         "final": output_dir / "logical_vehicle_id_final.mp4",
-        "debug": output_dir / "logical_vehicle_id_debug.mp4",
-        "review": output_dir / "logical_vehicle_id_review.mp4",
     }
 
 
@@ -43,6 +41,15 @@ def equal_frame_windows(total_frames: int, window_count: int = 3) -> list[tuple[
     return [(boundaries[index], boundaries[index + 1]) for index in range(window_count)]
 
 
+def final_render_rows(logical_rows: list[dict]) -> list[dict]:
+    return [
+        row
+        for row in logical_rows
+        if row.get("association_status") == "accepted"
+        and row.get("final_gate_status") == "AUTO_KEEP"
+    ]
+
+
 def render_window_slice_videos(
     clip_path: Path,
     logical_rows: list[dict],
@@ -54,11 +61,10 @@ def render_window_slice_videos(
     windows = equal_frame_windows(total_frames, window_count=window_count)
     paths = logical_window_output_paths(output_dir, window_count=window_count)
     for (window_name, path), (start_frame, end_frame) in zip(paths.items(), windows):
-        render_logical_vehicle_video(
+        render_final_logical_vehicle_video(
             clip_path=clip_path,
             logical_rows=logical_rows,
             output_path=path,
-            mode="final",
             fps=fps,
             start_frame=start_frame,
             end_frame=end_frame,
@@ -122,19 +128,18 @@ def build_outputs(
     ensure_review_asset_dirs(output_dir)
     write_consistency_outputs(output_dir, outputs)
     video_paths = logical_video_output_paths(output_dir)
+    final_rows = final_render_rows(outputs.logical_tracks)
     if render_videos:
-        for mode, path in video_paths.items():
-            render_logical_vehicle_video(
-                clip_path=clip_path,
-                logical_rows=outputs.logical_tracks,
-                output_path=path,
-                mode=mode,
-                fps=fps,
-            )
+        render_final_logical_vehicle_video(
+            clip_path=clip_path,
+            logical_rows=final_rows,
+            output_path=video_paths["final"],
+            fps=fps,
+        )
         if render_window_slices:
             render_window_slice_videos(
                 clip_path=clip_path,
-                logical_rows=outputs.logical_tracks,
+                logical_rows=final_rows,
                 output_dir=output_dir,
                 fps=fps,
                 window_count=window_slice_count,

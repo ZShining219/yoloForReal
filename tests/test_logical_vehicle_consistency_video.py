@@ -5,11 +5,11 @@ import unittest
 MODULE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(MODULE_ROOT / "tools"))
 
-from build_logical_vehicle_id_video import detection_label, rows_by_frame
+from build_logical_vehicle_id_video import final_color_map, final_detection_label, rows_by_frame
 
 
 class LogicalVehicleConsistencyVideoTest(unittest.TestCase):
-    def test_debug_label_shows_logical_and_raw_ids(self):
+    def test_final_label_shows_only_logical_vehicle_id(self):
         row = {
             "logical_vehicle_id": "lv_0014",
             "raw_track_id": "mot_0384",
@@ -17,19 +17,9 @@ class LogicalVehicleConsistencyVideoTest(unittest.TestCase):
             "confidence": "0.8123",
         }
 
-        self.assertEqual(detection_label(row, mode="debug"), "lv_0014/mot_0384 DEBUG car 0.81")
+        self.assertEqual(final_detection_label(row), "lv_0014")
 
-    def test_final_label_prioritizes_logical_id_only(self):
-        row = {
-            "logical_vehicle_id": "lv_0014",
-            "raw_track_id": "mot_0384",
-            "class_name": "car",
-            "confidence": "0.8123",
-        }
-
-        self.assertEqual(detection_label(row, mode="final"), "lv_0014 FINAL car 0.81")
-
-    def test_final_mode_hides_rows_not_kept_by_final_gate(self):
+    def test_rows_by_frame_keeps_all_supplied_final_rows(self):
         rows = [
             {
                 "frame_id": "1",
@@ -47,9 +37,22 @@ class LogicalVehicleConsistencyVideoTest(unittest.TestCase):
             },
         ]
 
-        grouped = rows_by_frame(rows, mode="final")
+        grouped = rows_by_frame(rows)
 
-        self.assertEqual([row["logical_vehicle_id"] for row in grouped[1]], ["lv_0001"])
+        self.assertEqual([row["logical_vehicle_id"] for row in grouped[1]], ["lv_0001", "lv_0002"])
+
+    def test_final_color_map_assigns_unique_highlight_colors(self):
+        rows = [
+            {"logical_vehicle_id": "lv_0001"},
+            {"logical_vehicle_id": "lv_0002"},
+            {"logical_vehicle_id": "lv_0001"},
+        ]
+
+        colors = final_color_map(rows)
+
+        self.assertEqual(set(colors), {"lv_0001", "lv_0002"})
+        self.assertNotEqual(colors["lv_0001"], colors["lv_0002"])
+        self.assertTrue(all(max(color) >= 180 for color in colors.values()))
 
 
 if __name__ == "__main__":
