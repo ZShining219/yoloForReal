@@ -1,0 +1,27 @@
+.DS_Store
+**/.DS_Store
+
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+.playwright-mcp/
+
+# Large generated media and packed review artifacts
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.zip
+*.pt
+
+# Archived historical outputs are kept locally for traceability, but should not
+# be pushed as part of the active v3 repository.
+outputs/old/
+
+# Runtime scratch outputs
+tmp/
+*.tmp

@@ -1,0 +1,4 @@
+from_tracklet_id,to_tracklet_id,from_raw_track_id,to_raw_track_id,from_end_frame,to_start_frame,gap_frames,predicted_distance_px,size_ratio,link_cost,link_status,review_status
+mot_0420_tl02,mot_0420_tl03,mot_0420,mot_0420,1390,1393,2,2.55,1.03,6.55,ACCEPT_CANDIDATE,PENDING_REVIEW
+mot_0421_tl02,mot_0420_tl03,mot_0421,mot_0420,1391,1393,1,6.97,1.17,11.97,ACCEPT_CANDIDATE,PENDING_REVIEW
+mot_0424_tl01,mot_0424_tl02,mot_0424,mot_0424,1392,1397,4,2.37,1.04,10.37,ACCEPT_CANDIDATE,PENDING_REVIEW

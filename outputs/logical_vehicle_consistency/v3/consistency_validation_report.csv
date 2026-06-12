@@ -1,0 +1,3 @@
+check_name,logical_vehicle_id,frame_id,status,message
+one_bbox_per_logical_vehicle_per_frame,__all__,,PASS,accepted rows have at most one bbox per logical vehicle per frame
+retained_detection_state,__all__,,PASS,0 rows missing association_status

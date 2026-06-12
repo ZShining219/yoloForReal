@@ -1,0 +1,3 @@
+fragment_logical_vehicle_id,mature_logical_vehicle_id,fragment_raw_track_ids,mature_raw_track_ids,fragment_frame_count,mature_frame_count,overlap_frame_count,gap_fill_frame_count,overlap_ratio,median_iou,median_center_distance_px,median_size_ratio,action,reason
+lv_0017,lv_0009,mot_0226,mot_0010,6,1999,5,1,0.8333,0.8046,6.50,1.22,AUTO_ABSORB_FRAGMENT_PATH,short_fragment_near_mature_path
+lv_0018,lv_0009,mot_0226,mot_0010,30,1999,30,0,1.0000,0.8119,6.35,1.22,AUTO_ABSORB_FRAGMENT_PATH,short_fragment_near_mature_path

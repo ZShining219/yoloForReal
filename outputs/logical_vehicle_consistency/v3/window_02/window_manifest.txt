@@ -1,0 +1,3 @@
+window=window_02
+start_frame=667
+end_frame=1334

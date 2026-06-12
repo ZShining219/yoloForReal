@@ -1,0 +1,8 @@
+from_tracklet_id,to_tracklet_id,from_raw_track_id,to_raw_track_id,gap_frames,predicted_distance_px,size_ratio,link_cost,risk_reason
+mot_0006_tl01,mot_0166_tl01,mot_0006,mot_0166,2,6.36,1.63,13.36,cross_raw|large_size_ratio
+mot_0226_tl01,mot_0226_tl02,mot_0226,mot_0226,6,0.43,1.01,12.43,long_gap
+mot_0420_tl05,mot_0424_tl03,mot_0420,mot_0424,8,12.55,1.50,31.55,cross_raw|long_gap|high_link_cost
+mot_0488_tl02,mot_0488_tl03,mot_0488,mot_0488,6,1.11,1.04,13.11,long_gap
+mot_0622_tl08,mot_0622_tl09,mot_0622,mot_0622,6,5.00,1.24,17.00,long_gap
+mot_0622_tl09,mot_0622_tl10,mot_0622,mot_0622,7,17.63,1.20,31.63,long_gap|high_link_cost
+mot_0622_tl16,mot_0622_tl17,mot_0622,mot_0622,6,5.14,1.06,17.14,long_gap
