@@ -389,6 +389,46 @@ class LogicalVehicleConsistencyTest(unittest.TestCase):
         self.assertEqual({row["logical_vehicle_id"] for row in merged_rows}, {"lv_0001"})
         self.assertEqual(review_rows[0]["suggested_action"], "AUTO_MERGE_APPLIED")
 
+    def test_same_raw_occlusion_recovery_merges_medium_gap_smooth_motion(self):
+        logical_rows = []
+        for frame in range(30):
+            logical_rows.append(
+                {
+                    **detection(frame, 622, 100 + frame, cy=150),
+                    "x1": f"{82 + frame:.2f}",
+                    "y1": "133.00",
+                    "x2": f"{118 + frame:.2f}",
+                    "y2": "167.00",
+                    "logical_vehicle_id": "lv_0001",
+                    "raw_track_id": "mot_0622",
+                    "tracklet_id": "mot_0622_lv_0001",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+        for frame in range(41, 71):
+            cx = 100 + frame
+            logical_rows.append(
+                {
+                    **detection(frame, 622, cx, cy=150),
+                    "x1": f"{cx - 18:.2f}",
+                    "y1": "133.00",
+                    "x2": f"{cx + 18:.2f}",
+                    "y2": "167.00",
+                    "logical_vehicle_id": "lv_0002",
+                    "raw_track_id": "mot_0622",
+                    "tracklet_id": "mot_0622_lv_0002",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+
+        merged_rows, review_rows = apply_same_raw_continuity_merges(logical_rows)
+
+        self.assertEqual({row["logical_vehicle_id"] for row in merged_rows}, {"lv_0001"})
+        self.assertEqual(review_rows[0]["suggested_action"], "AUTO_MERGE_APPLIED")
+        self.assertEqual(review_rows[0]["merge_reason"], "same_raw_occlusion_recovery")
+
     def test_same_raw_continuity_merge_skips_temporal_overlap(self):
         logical_rows = [
             {

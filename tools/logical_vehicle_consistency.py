@@ -135,7 +135,11 @@ RAW_SPLIT_REVIEW_FIELDS = [
     "to_logical_vehicle_id",
     "gap_frames",
     "center_distance_px",
+    "center_distance_per_frame",
+    "bbox_size_ratio",
+    "class_compatible",
     "suggested_action",
+    "merge_reason",
 ]
 
 RISKY_LINK_REVIEW_FIELDS = [
@@ -910,8 +914,23 @@ def build_raw_track_split_review(logical_rows: list[dict]) -> list[dict]:
         for (from_id, from_rows), (to_id, to_rows) in zip(chunks, chunks[1:]):
             gap = int(float(to_rows[0]["frame_id"])) - int(float(from_rows[-1]["frame_id"])) - 1
             center_distance = distance(center(from_rows[-1]), center(to_rows[0]))
+            center_distance_per_frame = center_distance / max(1, gap + 1)
+            ratio = row_size_ratio(from_rows[-1], to_rows[0])
+            compatible = class_compatible(dominant_class(from_rows), dominant_class(to_rows))
+            reason = ""
             if gap <= 3 and center_distance <= 2.0:
                 action = "AUTO_MERGE_SAME_RAW_CONTINUITY"
+                reason = "same_raw_low_gap_continuity"
+            elif (
+                4 <= gap <= 25
+                and len(from_rows) >= 20
+                and len(to_rows) >= 20
+                and center_distance_per_frame <= 2.0
+                and ratio <= 1.35
+                and compatible
+            ):
+                action = "AUTO_MERGE_SAME_RAW_OCCLUSION"
+                reason = "same_raw_occlusion_recovery"
             elif gap <= 30 and center_distance <= 30.0:
                 action = "REVIEW_RAW_SPLIT"
             else:
@@ -923,7 +942,11 @@ def build_raw_track_split_review(logical_rows: list[dict]) -> list[dict]:
                     "to_logical_vehicle_id": to_id,
                     "gap_frames": str(gap),
                     "center_distance_px": f"{center_distance:.2f}",
+                    "center_distance_per_frame": f"{center_distance_per_frame:.2f}",
+                    "bbox_size_ratio": f"{ratio:.2f}",
+                    "class_compatible": "yes" if compatible else "no",
                     "suggested_action": action,
+                    "merge_reason": reason,
                 }
             )
     return output
@@ -1000,7 +1023,8 @@ def suppress_same_logical_duplicate_like_rows(logical_rows: list[dict]) -> list[
 def apply_same_raw_continuity_merges(logical_rows: list[dict]) -> tuple[list[dict], list[dict]]:
     """Apply only low-risk same-raw splits that cannot create same-frame duplicates."""
     review_rows = build_raw_track_split_review(logical_rows)
-    merge_candidates = [row for row in review_rows if row["suggested_action"] == "AUTO_MERGE_SAME_RAW_CONTINUITY"]
+    merge_actions = {"AUTO_MERGE_SAME_RAW_CONTINUITY", "AUTO_MERGE_SAME_RAW_OCCLUSION"}
+    merge_candidates = [row for row in review_rows if row["suggested_action"] in merge_actions]
     parent: dict[str, str] = {}
 
     def find(logical_id: str) -> str:
@@ -1046,7 +1070,7 @@ def apply_same_raw_continuity_merges(logical_rows: list[dict]) -> tuple[list[dic
     applied_review_rows = []
     for review_row in review_rows:
         review_copy = dict(review_row)
-        if review_row["suggested_action"] != "AUTO_MERGE_SAME_RAW_CONTINUITY":
+        if review_row["suggested_action"] not in merge_actions:
             applied_review_rows.append(review_copy)
             continue
         canonical = find(review_row["from_logical_vehicle_id"])
