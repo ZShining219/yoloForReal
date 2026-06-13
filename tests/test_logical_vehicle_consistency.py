@@ -10,6 +10,7 @@ from logical_vehicle_consistency import (
     apply_same_raw_continuity_merges,
     associate_tracklets,
     build_cross_raw_recovery_review,
+    build_flicker_gap_review,
     build_logical_vehicle_consistency,
     build_final_target_gate,
     build_identity_purity_report,
@@ -431,6 +432,62 @@ class LogicalVehicleConsistencyTest(unittest.TestCase):
         self.assertEqual(by_id["lv_0041"]["quality_status"], "RISK_REVIEW")
         self.assertIn("sparse_track", by_id["lv_0041"]["risk_reasons"])
         self.assertIn("flicker_fragmented", by_id["lv_0041"]["risk_reasons"])
+        self.assertIn("mean_speed_px_per_frame", by_id["lv_0041"])
+        self.assertIn("direction_consistency", by_id["lv_0041"])
+        self.assertIn("nearby_competitor_count", by_id["lv_0041"])
+        self.assertIn("risk_score", by_id["lv_0041"])
+
+    def test_target_quality_report_counts_nearby_competitor_frames(self):
+        logical_rows = []
+        for logical_id, raw_track_id, cy in [
+            ("lv_0001", "mot_0001", 100),
+            ("lv_0002", "mot_0002", 145),
+        ]:
+            for frame in range(4):
+                logical_rows.append(
+                    {
+                        **detection(frame, raw_track_id, 100 + frame, cy=cy),
+                        "logical_vehicle_id": logical_id,
+                        "raw_track_id": raw_track_id,
+                        "tracklet_id": f"{raw_track_id}_tl01",
+                        "source": "detected",
+                        "association_status": "accepted",
+                    }
+                )
+
+        report = build_target_quality_report(logical_rows)
+        by_id = {row["logical_vehicle_id"]: row for row in report}
+
+        self.assertEqual(by_id["lv_0001"]["nearby_competitor_count"], "4")
+        self.assertIn("nearby_competitor", by_id["lv_0001"]["risk_reasons"])
+
+    def test_target_quality_report_keeps_nearby_competitor_informational_for_stable_tracks(self):
+        logical_rows = []
+        for logical_id, raw_track_id, cy in [
+            ("lv_0001", "mot_0001", 100),
+            ("lv_0002", "mot_0002", 145),
+        ]:
+            for frame in range(90):
+                row = {
+                    **detection(frame, raw_track_id, 100 + frame, cy=cy),
+                    "x1": f"{75 + frame:.2f}",
+                    "y1": f"{cy - 20:.2f}",
+                    "x2": f"{125 + frame:.2f}",
+                    "y2": f"{cy + 20:.2f}",
+                    "logical_vehicle_id": logical_id,
+                    "raw_track_id": raw_track_id,
+                    "tracklet_id": f"{raw_track_id}_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+                logical_rows.append(row)
+
+        report = build_target_quality_report(logical_rows)
+        by_id = {row["logical_vehicle_id"]: row for row in report}
+
+        self.assertEqual(by_id["lv_0001"]["nearby_competitor_count"], "90")
+        self.assertEqual(by_id["lv_0001"]["quality_status"], "QUALITY_PASS")
+        self.assertNotIn("nearby_competitor", by_id["lv_0001"]["risk_reasons"])
 
     def test_cross_raw_recovery_review_reports_smooth_candidate(self):
         logical_rows = []
@@ -463,6 +520,71 @@ class LogicalVehicleConsistencyTest(unittest.TestCase):
         self.assertEqual(report[0]["from_logical_vehicle_id"], "lv_0021")
         self.assertEqual(report[0]["to_logical_vehicle_id"], "lv_0036")
         self.assertEqual(report[0]["review_status"], "REVIEW_CROSS_RAW_RECOVERY")
+        self.assertEqual(report[0]["competing_candidate_count"], "1")
+
+    def test_cross_raw_recovery_review_reports_competing_candidate_delta(self):
+        logical_rows = []
+        for frame in range(30):
+            logical_rows.append(
+                {
+                    **detection(frame, 588, 100 + frame, cy=50),
+                    "logical_vehicle_id": "lv_0039",
+                    "raw_track_id": "mot_0588",
+                    "tracklet_id": "mot_0588_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+        for logical_id, raw_track_id, start_frame, cy in [
+            ("lv_0040", "mot_0621", 70, 52),
+            ("lv_0041", "mot_0622", 71, 75),
+        ]:
+            for frame in range(start_frame, start_frame + 30):
+                logical_rows.append(
+                    {
+                        **detection(frame, raw_track_id, 100 + frame * 0.7, cy=cy),
+                        "logical_vehicle_id": logical_id,
+                        "raw_track_id": raw_track_id,
+                        "tracklet_id": f"{raw_track_id}_tl01",
+                        "source": "detected",
+                        "association_status": "accepted",
+                    }
+                )
+
+        report = build_cross_raw_recovery_review(logical_rows)
+        by_to = {row["to_logical_vehicle_id"]: row for row in report}
+
+        self.assertEqual(by_to["lv_0040"]["candidate_rank"], "1")
+        self.assertEqual(by_to["lv_0041"]["candidate_rank"], "2")
+        self.assertEqual(by_to["lv_0041"]["competing_candidate_count"], "2")
+        self.assertGreater(float(by_to["lv_0041"]["best_candidate_margin"]), 0.0)
+
+    def test_flicker_gap_review_reports_internal_track_gaps(self):
+        logical_rows = []
+        for frame, tracklet_id, confidence in [
+            (0, "mot_0622_tl01", "0.8000"),
+            (1, "mot_0622_tl01", "0.7500"),
+            (8, "mot_0622_tl02", "0.3500"),
+            (9, "mot_0622_tl02", "0.5000"),
+        ]:
+            logical_rows.append(
+                {
+                    **detection(frame, 622, 100 + frame, cy=150, confidence=confidence),
+                    "logical_vehicle_id": "lv_0041",
+                    "raw_track_id": "mot_0622",
+                    "tracklet_id": tracklet_id,
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+
+        report = build_flicker_gap_review(logical_rows)
+
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report[0]["logical_vehicle_id"], "lv_0041")
+        self.assertEqual(report[0]["gap_frames"], "6")
+        self.assertEqual(report[0]["review_status"], "FLICKER_GAP_REVIEW")
+        self.assertIn("low_confidence_context", report[0]["reason"])
 
     def test_final_gate_requires_validity_and_purity_pass(self):
         summary_rows = [

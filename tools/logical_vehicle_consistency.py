@@ -186,6 +186,12 @@ TARGET_QUALITY_FIELDS = [
     "median_bbox_area",
     "total_displacement_px",
     "border_touch_ratio",
+    "mean_speed_px_per_frame",
+    "direction_consistency",
+    "bbox_growth_ratio",
+    "edge_entry_or_exit",
+    "nearby_competitor_count",
+    "risk_score",
     "quality_status",
     "risk_reasons",
 ]
@@ -203,6 +209,25 @@ CROSS_RAW_RECOVERY_FIELDS = [
     "bbox_size_ratio",
     "class_compatible",
     "candidate_rank",
+    "competing_candidate_count",
+    "best_candidate_margin",
+    "review_status",
+    "reason",
+]
+
+FLICKER_GAP_FIELDS = [
+    "logical_vehicle_id",
+    "raw_track_ids",
+    "from_frame",
+    "to_frame",
+    "gap_frames",
+    "from_tracklet_id",
+    "to_tracklet_id",
+    "center_distance_px",
+    "center_distance_per_frame",
+    "bbox_size_ratio",
+    "from_confidence",
+    "to_confidence",
     "review_status",
     "reason",
 ]
@@ -275,6 +300,7 @@ class ConsistencyOutputs:
     fragment_path_absorption_review: list[dict]
     target_quality_report: list[dict]
     cross_raw_recovery_review: list[dict]
+    flicker_gap_review: list[dict]
 
     def as_dict(self) -> dict[str, list[dict]]:
         return {
@@ -295,6 +321,7 @@ class ConsistencyOutputs:
             "fragment_path_absorption_review": self.fragment_path_absorption_review,
             "target_quality_report": self.target_quality_report,
             "cross_raw_recovery_review": self.cross_raw_recovery_review,
+            "flicker_gap_review": self.flicker_gap_review,
         }
 
 
@@ -834,7 +861,67 @@ def border_touch_ratio(rows: list[dict], frame_width: float = 1920.0, frame_heig
     return len(touches) / len(rows)
 
 
-def target_quality_metrics(rows: list[dict]) -> dict:
+def speed_values(rows: list[dict]) -> list[float]:
+    ordered = sorted(rows, key=lambda row: (frame_id(row), row["raw_track_id"]))
+    values = []
+    for previous, current in zip(ordered, ordered[1:]):
+        gap = frame_id(current) - frame_id(previous)
+        if gap <= 0:
+            continue
+        values.append(distance(center(previous), center(current)) / gap)
+    return values
+
+
+def direction_consistency(rows: list[dict]) -> float:
+    ordered = sorted(rows, key=lambda row: (frame_id(row), row["raw_track_id"]))
+    vectors = []
+    for previous, current in zip(ordered, ordered[1:]):
+        gap = frame_id(current) - frame_id(previous)
+        if gap <= 0:
+            continue
+        previous_center = center(previous)
+        current_center = center(current)
+        vector = ((current_center[0] - previous_center[0]) / gap, (current_center[1] - previous_center[1]) / gap)
+        if math.hypot(vector[0], vector[1]) > 0.01:
+            vectors.append(vector)
+    if len(vectors) < 2:
+        return 1.0
+    aligned = 0
+    for previous, current in zip(vectors, vectors[1:]):
+        if previous[0] * current[0] + previous[1] * current[1] >= 0:
+            aligned += 1
+    return aligned / (len(vectors) - 1)
+
+
+def bbox_growth_ratio(rows: list[dict]) -> float:
+    areas = [bbox_area(row) for row in rows]
+    return max(areas) / max(min(areas), 0.01) if areas else 1.0
+
+
+def edge_entry_or_exit(rows: list[dict]) -> str:
+    ordered = sorted(rows, key=lambda row: (frame_id(row), row["raw_track_id"]))
+    if not ordered:
+        return "no"
+    return "yes" if border_touch_ratio([ordered[0], ordered[-1]]) > 0 else "no"
+
+
+def nearby_competitor_count(rows: list[dict], accepted_rows: list[dict], max_center_distance_px: float = 80.0) -> int:
+    by_frame: dict[int, list[dict]] = defaultdict(list)
+    for row in accepted_rows:
+        by_frame[frame_id(row)].append(row)
+    logical_ids = {row["logical_vehicle_id"] for row in rows}
+    count = 0
+    for row in rows:
+        for other in by_frame.get(frame_id(row), []):
+            if other["logical_vehicle_id"] in logical_ids:
+                continue
+            if distance(center(row), center(other)) <= max_center_distance_px:
+                count += 1
+                break
+    return count
+
+
+def target_quality_metrics(rows: list[dict], accepted_rows: list[dict] | None = None) -> dict:
     ordered = sorted(rows, key=lambda row: (frame_id(row), row["raw_track_id"]))
     start, end, duration = frame_span(ordered)
     frame_gaps = [
@@ -845,6 +932,7 @@ def target_quality_metrics(rows: list[dict]) -> dict:
     low_confidence_count = sum(1 for row in ordered if as_float(row, "confidence") < 0.4)
     area_median = median([bbox_area(row) for row in ordered])
     total_displacement = distance(center(ordered[0]), center(ordered[-1])) if len(ordered) > 1 else 0.0
+    speeds = speed_values(ordered)
     return {
         "start_frame": start,
         "end_frame": end,
@@ -857,6 +945,11 @@ def target_quality_metrics(rows: list[dict]) -> dict:
         "median_bbox_area": area_median,
         "total_displacement_px": total_displacement,
         "border_touch_ratio": border_touch_ratio(ordered),
+        "mean_speed_px_per_frame": sum(speeds) / len(speeds) if speeds else 0.0,
+        "direction_consistency": direction_consistency(ordered),
+        "bbox_growth_ratio": bbox_growth_ratio(ordered),
+        "edge_entry_or_exit": edge_entry_or_exit(ordered),
+        "nearby_competitor_count": nearby_competitor_count(ordered, accepted_rows or ordered),
     }
 
 
@@ -878,17 +971,20 @@ def target_quality_reasons(metrics: dict, detected_frame_count: int) -> list[str
         reasons.append("border_short_target")
     if detected_frame_count < 80 and metrics["total_displacement_px"] < 8.0:
         reasons.append("static_like")
+    nearby_competitor_ratio = metrics.get("nearby_competitor_count", 0) / max(1, detected_frame_count)
+    if reasons and nearby_competitor_ratio >= 0.30:
+        reasons.append("nearby_competitor")
     return reasons
 
 
 def build_target_quality_report(logical_rows: list[dict]) -> list[dict]:
+    accepted_rows = [row for row in logical_rows if row.get("association_status") == "accepted"]
     by_logical: dict[str, list[dict]] = defaultdict(list)
-    for row in logical_rows:
-        if row.get("association_status") == "accepted":
-            by_logical[row["logical_vehicle_id"]].append(row)
+    for row in accepted_rows:
+        by_logical[row["logical_vehicle_id"]].append(row)
     report = []
     for logical_id, rows in sorted(by_logical.items()):
-        metrics = target_quality_metrics(rows)
+        metrics = target_quality_metrics(rows, accepted_rows)
         reasons = target_quality_reasons(metrics, len(rows))
         report.append(
             {
@@ -906,6 +1002,12 @@ def build_target_quality_report(logical_rows: list[dict]) -> list[dict]:
                 "median_bbox_area": f"{metrics['median_bbox_area']:.2f}",
                 "total_displacement_px": f"{metrics['total_displacement_px']:.2f}",
                 "border_touch_ratio": f"{metrics['border_touch_ratio']:.4f}",
+                "mean_speed_px_per_frame": f"{metrics['mean_speed_px_per_frame']:.2f}",
+                "direction_consistency": f"{metrics['direction_consistency']:.4f}",
+                "bbox_growth_ratio": f"{metrics['bbox_growth_ratio']:.2f}",
+                "edge_entry_or_exit": metrics["edge_entry_or_exit"],
+                "nearby_competitor_count": str(metrics["nearby_competitor_count"]),
+                "risk_score": str(len(reasons)),
                 "quality_status": "RISK_REVIEW" if reasons else "QUALITY_PASS",
                 "risk_reasons": "|".join(reasons),
             }
@@ -1322,10 +1424,62 @@ def build_cross_raw_recovery_review(
         for rank, row in enumerate(ranked, start=1):
             copy = dict(row)
             copy["candidate_rank"] = str(rank)
+            copy["competing_candidate_count"] = str(len(ranked))
+            best_score = float(ranked[0]["center_distance_per_frame"])
+            copy["best_candidate_margin"] = f"{float(copy['center_distance_per_frame']) - best_score:.2f}"
             if rank > 1:
                 copy["reason"] = f"{copy['reason']}|competing_candidate"
             output.append(copy)
     return output
+
+
+def build_flicker_gap_review(
+    logical_rows: list[dict],
+    min_gap_frames: int = 1,
+    long_gap_frames: int = 5,
+    low_confidence_threshold: float = 0.4,
+) -> list[dict]:
+    by_logical: dict[str, list[dict]] = defaultdict(list)
+    for row in logical_rows:
+        if row.get("association_status") == "accepted":
+            by_logical[row["logical_vehicle_id"]].append(row)
+
+    output = []
+    for logical_id, rows in sorted(by_logical.items()):
+        ordered = sorted(rows, key=lambda row: (frame_id(row), row["raw_track_id"]))
+        for previous, current in zip(ordered, ordered[1:]):
+            gap = frame_id(current) - frame_id(previous) - 1
+            if gap < min_gap_frames:
+                continue
+            center_distance = distance(center(previous), center(current))
+            reasons = []
+            if gap >= long_gap_frames:
+                reasons.append("long_gap")
+            if previous["tracklet_id"] != current["tracklet_id"]:
+                reasons.append("tracklet_break")
+            if as_float(previous, "confidence") < low_confidence_threshold or as_float(current, "confidence") < low_confidence_threshold:
+                reasons.append("low_confidence_context")
+            if not reasons:
+                reasons.append("short_gap")
+            output.append(
+                {
+                    "logical_vehicle_id": logical_id,
+                    "raw_track_ids": raw_track_ids_for_rows(rows),
+                    "from_frame": str(frame_id(previous)),
+                    "to_frame": str(frame_id(current)),
+                    "gap_frames": str(gap),
+                    "from_tracklet_id": previous["tracklet_id"],
+                    "to_tracklet_id": current["tracklet_id"],
+                    "center_distance_px": f"{center_distance:.2f}",
+                    "center_distance_per_frame": f"{center_distance / max(1, gap + 1):.2f}",
+                    "bbox_size_ratio": f"{row_size_ratio(previous, current):.2f}",
+                    "from_confidence": previous.get("confidence", ""),
+                    "to_confidence": current.get("confidence", ""),
+                    "review_status": "FLICKER_GAP_REVIEW",
+                    "reason": "|".join(reasons),
+                }
+            )
+    return sorted(output, key=lambda row: (row["logical_vehicle_id"], int(row["from_frame"]), int(row["to_frame"])))
 
 
 def rows_by_int_frame(rows: list[dict]) -> dict[int, dict]:
@@ -1593,6 +1747,7 @@ def build_logical_vehicle_consistency(
     validity_report = build_target_validity_report(logical_tracks)
     target_quality_report = build_target_quality_report(logical_tracks)
     cross_raw_recovery_review = build_cross_raw_recovery_review(logical_tracks)
+    flicker_gap_review = build_flicker_gap_review(logical_tracks)
     purity_report = build_identity_purity_report(logical_tracks)
     final_gate = build_final_target_gate(logical_vehicle_summary, validity_report, purity_report)
     logical_tracks = apply_final_gate_to_tracks(logical_tracks, final_gate)
@@ -1614,6 +1769,7 @@ def build_logical_vehicle_consistency(
         fragment_path_absorption_review=fragment_absorption_review,
         target_quality_report=target_quality_report,
         cross_raw_recovery_review=cross_raw_recovery_review,
+        flicker_gap_review=flicker_gap_review,
     )
 
 
@@ -1636,3 +1792,4 @@ def write_consistency_outputs(output_dir: Path, outputs: ConsistencyOutputs) -> 
     write_csv(output_dir / "fragment_path_absorption_review.csv", outputs.fragment_path_absorption_review, FRAGMENT_PATH_ABSORPTION_FIELDS)
     write_csv(output_dir / "target_quality_report.csv", outputs.target_quality_report, TARGET_QUALITY_FIELDS)
     write_csv(output_dir / "cross_raw_recovery_review.csv", outputs.cross_raw_recovery_review, CROSS_RAW_RECOVERY_FIELDS)
+    write_csv(output_dir / "flicker_gap_review.csv", outputs.flicker_gap_review, FLICKER_GAP_FIELDS)
