@@ -9,9 +9,11 @@ from logical_vehicle_consistency import (
     apply_fragment_path_absorption,
     apply_same_raw_continuity_merges,
     associate_tracklets,
+    build_cross_raw_recovery_review,
     build_logical_vehicle_consistency,
     build_final_target_gate,
     build_identity_purity_report,
+    build_target_quality_report,
     build_tracklets,
     build_target_validity_report,
     group_same_frame_duplicates,
@@ -344,6 +346,123 @@ class LogicalVehicleConsistencyTest(unittest.TestCase):
 
         self.assertEqual(report[0]["vehicle_validity_status"], "REVIEW_ONLY_IF_UNCERTAIN")
         self.assertEqual(report[0]["review_reason"], "small_short_vehicle_like_target")
+
+    def test_vehicle_validity_marks_short_small_car_target_uncertain(self):
+        logical_rows = []
+        for frame in range(40):
+            logical_rows.append(
+                {
+                    **detection(frame, 402, 560 + frame * 0.5, cy=40, confidence="0.5500"),
+                    "x1": f"{545 + frame * 0.5:.2f}",
+                    "y1": "25.00",
+                    "x2": f"{575 + frame * 0.5:.2f}",
+                    "y2": "58.00",
+                    "logical_vehicle_id": "lv_0023",
+                    "raw_track_id": "mot_0402",
+                    "tracklet_id": "mot_0402_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+
+        report = build_target_validity_report(logical_rows)
+
+        self.assertEqual(report[0]["vehicle_validity_status"], "REVIEW_ONLY_IF_UNCERTAIN")
+        self.assertEqual(report[0]["review_reason"], "short_small_target")
+
+    def test_vehicle_validity_excludes_very_short_static_low_confidence_target(self):
+        logical_rows = []
+        for frame in range(3):
+            logical_rows.append(
+                {
+                    **detection(frame, 27, 80, confidence="0.3100"),
+                    "x1": "60.00",
+                    "y1": "60.00",
+                    "x2": "100.00",
+                    "y2": "95.00",
+                    "logical_vehicle_id": "lv_0027",
+                    "raw_track_id": "mot_0027",
+                    "tracklet_id": "mot_0027_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+
+        report = build_target_validity_report(logical_rows)
+
+        self.assertEqual(report[0]["vehicle_validity_status"], "AUTO_EXCLUDE")
+        self.assertEqual(report[0]["exclude_reason"], "short_static_false_positive")
+
+    def test_target_quality_report_flags_short_border_and_fragmented_tracks(self):
+        logical_rows = []
+        for frame in range(40):
+            logical_rows.append(
+                {
+                    **detection(frame, 402, 560 + frame * 0.5, cy=15, confidence="0.5500"),
+                    "x1": f"{545 + frame * 0.5:.2f}",
+                    "y1": "0.50",
+                    "x2": f"{575 + frame * 0.5:.2f}",
+                    "y2": "30.00",
+                    "logical_vehicle_id": "lv_0023",
+                    "raw_track_id": "mot_0402",
+                    "tracklet_id": "mot_0402_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+        for frame in [0, 1, 5, 6, 12, 13, 20, 21]:
+            logical_rows.append(
+                {
+                    **detection(frame, 622, 100 + frame, cy=150, confidence="0.3500"),
+                    "logical_vehicle_id": "lv_0041",
+                    "raw_track_id": "mot_0622",
+                    "tracklet_id": f"mot_0622_tl{frame:02d}",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+
+        report = build_target_quality_report(logical_rows)
+        by_id = {row["logical_vehicle_id"]: row for row in report}
+
+        self.assertEqual(by_id["lv_0023"]["quality_status"], "RISK_REVIEW")
+        self.assertIn("border_short_target", by_id["lv_0023"]["risk_reasons"])
+        self.assertIn("small_area", by_id["lv_0023"]["risk_reasons"])
+        self.assertEqual(by_id["lv_0041"]["quality_status"], "RISK_REVIEW")
+        self.assertIn("sparse_track", by_id["lv_0041"]["risk_reasons"])
+        self.assertIn("flicker_fragmented", by_id["lv_0041"]["risk_reasons"])
+
+    def test_cross_raw_recovery_review_reports_smooth_candidate(self):
+        logical_rows = []
+        for frame in range(30):
+            logical_rows.append(
+                {
+                    **detection(frame, 392, 100 + frame, cy=200, confidence="0.8500"),
+                    "logical_vehicle_id": "lv_0021",
+                    "raw_track_id": "mot_0392",
+                    "tracklet_id": "mot_0392_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+        for frame in range(70, 100):
+            logical_rows.append(
+                {
+                    **detection(frame, 570, 100 + frame * 0.9, cy=200, confidence="0.8000"),
+                    "logical_vehicle_id": "lv_0036",
+                    "raw_track_id": "mot_0570",
+                    "tracklet_id": "mot_0570_tl01",
+                    "source": "detected",
+                    "association_status": "accepted",
+                }
+            )
+
+        report = build_cross_raw_recovery_review(logical_rows)
+
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report[0]["from_logical_vehicle_id"], "lv_0021")
+        self.assertEqual(report[0]["to_logical_vehicle_id"], "lv_0036")
+        self.assertEqual(report[0]["review_status"], "REVIEW_CROSS_RAW_RECOVERY")
 
     def test_final_gate_requires_validity_and_purity_pass(self):
         summary_rows = [

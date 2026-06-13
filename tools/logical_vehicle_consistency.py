@@ -171,6 +171,42 @@ FRAGMENT_PATH_ABSORPTION_FIELDS = [
     "reason",
 ]
 
+TARGET_QUALITY_FIELDS = [
+    "logical_vehicle_id",
+    "raw_track_ids",
+    "detected_frame_count",
+    "start_frame",
+    "end_frame",
+    "duration_frames",
+    "coverage_ratio",
+    "tracklet_count",
+    "gap_count",
+    "low_confidence_count",
+    "low_confidence_ratio",
+    "median_bbox_area",
+    "total_displacement_px",
+    "border_touch_ratio",
+    "quality_status",
+    "risk_reasons",
+]
+
+CROSS_RAW_RECOVERY_FIELDS = [
+    "from_logical_vehicle_id",
+    "to_logical_vehicle_id",
+    "from_raw_track_ids",
+    "to_raw_track_ids",
+    "from_end_frame",
+    "to_start_frame",
+    "gap_frames",
+    "center_distance_px",
+    "center_distance_per_frame",
+    "bbox_size_ratio",
+    "class_compatible",
+    "candidate_rank",
+    "review_status",
+    "reason",
+]
+
 
 @dataclass
 class DuplicateGroupingResult:
@@ -237,6 +273,8 @@ class ConsistencyOutputs:
     raw_track_split_review: list[dict]
     risky_accepted_link_review: list[dict]
     fragment_path_absorption_review: list[dict]
+    target_quality_report: list[dict]
+    cross_raw_recovery_review: list[dict]
 
     def as_dict(self) -> dict[str, list[dict]]:
         return {
@@ -255,6 +293,8 @@ class ConsistencyOutputs:
             "raw_track_split_review": self.raw_track_split_review,
             "risky_accepted_link_review": self.risky_accepted_link_review,
             "fragment_path_absorption_review": self.fragment_path_absorption_review,
+            "target_quality_report": self.target_quality_report,
+            "cross_raw_recovery_review": self.cross_raw_recovery_review,
         }
 
 
@@ -773,6 +813,106 @@ def bbox_area(row: dict) -> float:
     return max(0.01, (as_float(row, "x2") - as_float(row, "x1")) * (as_float(row, "y2") - as_float(row, "y1")))
 
 
+def frame_span(rows: list[dict]) -> tuple[int, int, int]:
+    frames = [frame_id(row) for row in rows]
+    start = min(frames)
+    end = max(frames)
+    return start, end, end - start + 1
+
+
+def border_touch_ratio(rows: list[dict], frame_width: float = 1920.0, frame_height: float = 1080.0, margin_px: float = 2.0) -> float:
+    if not rows:
+        return 0.0
+    touches = [
+        row
+        for row in rows
+        if as_float(row, "x1") <= margin_px
+        or as_float(row, "y1") <= margin_px
+        or as_float(row, "x2") >= frame_width - margin_px
+        or as_float(row, "y2") >= frame_height - margin_px
+    ]
+    return len(touches) / len(rows)
+
+
+def target_quality_metrics(rows: list[dict]) -> dict:
+    ordered = sorted(rows, key=lambda row: (frame_id(row), row["raw_track_id"]))
+    start, end, duration = frame_span(ordered)
+    frame_gaps = [
+        frame_id(current) - frame_id(previous) - 1
+        for previous, current in zip(ordered, ordered[1:])
+        if frame_id(current) - frame_id(previous) > 1
+    ]
+    low_confidence_count = sum(1 for row in ordered if as_float(row, "confidence") < 0.4)
+    area_median = median([bbox_area(row) for row in ordered])
+    total_displacement = distance(center(ordered[0]), center(ordered[-1])) if len(ordered) > 1 else 0.0
+    return {
+        "start_frame": start,
+        "end_frame": end,
+        "duration_frames": duration,
+        "coverage_ratio": len(ordered) / duration if duration else 0.0,
+        "tracklet_count": len({row["tracklet_id"] for row in ordered}),
+        "gap_count": len(frame_gaps),
+        "low_confidence_count": low_confidence_count,
+        "low_confidence_ratio": low_confidence_count / len(ordered),
+        "median_bbox_area": area_median,
+        "total_displacement_px": total_displacement,
+        "border_touch_ratio": border_touch_ratio(ordered),
+    }
+
+
+def target_quality_reasons(metrics: dict, detected_frame_count: int) -> list[str]:
+    reasons = []
+    if detected_frame_count <= 5:
+        reasons.append("very_short_track")
+    elif detected_frame_count < 60:
+        reasons.append("short_track")
+    if metrics["coverage_ratio"] < 0.75:
+        reasons.append("sparse_track")
+    if metrics["tracklet_count"] >= 8 or metrics["gap_count"] >= 5:
+        reasons.append("flicker_fragmented")
+    if metrics["low_confidence_ratio"] >= 0.30:
+        reasons.append("low_confidence_many")
+    if metrics["median_bbox_area"] < 1200:
+        reasons.append("small_area")
+    if detected_frame_count < 80 and metrics["border_touch_ratio"] >= 0.30:
+        reasons.append("border_short_target")
+    if detected_frame_count < 80 and metrics["total_displacement_px"] < 8.0:
+        reasons.append("static_like")
+    return reasons
+
+
+def build_target_quality_report(logical_rows: list[dict]) -> list[dict]:
+    by_logical: dict[str, list[dict]] = defaultdict(list)
+    for row in logical_rows:
+        if row.get("association_status") == "accepted":
+            by_logical[row["logical_vehicle_id"]].append(row)
+    report = []
+    for logical_id, rows in sorted(by_logical.items()):
+        metrics = target_quality_metrics(rows)
+        reasons = target_quality_reasons(metrics, len(rows))
+        report.append(
+            {
+                "logical_vehicle_id": logical_id,
+                "raw_track_ids": raw_track_ids_for_rows(rows),
+                "detected_frame_count": str(len(rows)),
+                "start_frame": str(metrics["start_frame"]),
+                "end_frame": str(metrics["end_frame"]),
+                "duration_frames": str(metrics["duration_frames"]),
+                "coverage_ratio": f"{metrics['coverage_ratio']:.4f}",
+                "tracklet_count": str(metrics["tracklet_count"]),
+                "gap_count": str(metrics["gap_count"]),
+                "low_confidence_count": str(metrics["low_confidence_count"]),
+                "low_confidence_ratio": f"{metrics['low_confidence_ratio']:.4f}",
+                "median_bbox_area": f"{metrics['median_bbox_area']:.2f}",
+                "total_displacement_px": f"{metrics['total_displacement_px']:.2f}",
+                "border_touch_ratio": f"{metrics['border_touch_ratio']:.4f}",
+                "quality_status": "RISK_REVIEW" if reasons else "QUALITY_PASS",
+                "risk_reasons": "|".join(reasons),
+            }
+        )
+    return report
+
+
 def build_target_validity_report(logical_rows: list[dict]) -> list[dict]:
     by_logical: dict[str, list[dict]] = defaultdict(list)
     for row in logical_rows:
@@ -785,15 +925,28 @@ def build_target_validity_report(logical_rows: list[dict]) -> list[dict]:
         dominant_class = class_votes.most_common(1)[0][0] if class_votes else ""
         area_median = median([bbox_area(row) for row in rows])
         height_median = median([as_float(row, "y2") - as_float(row, "y1") for row in rows])
+        metrics = target_quality_metrics(rows)
+        quality_reasons = set(target_quality_reasons(metrics, len(rows)))
         status = "AUTO_KEEP"
         exclude_reason = ""
         review_reason = ""
         if dominant_class in {"motorcycle", "bicycle", "person"}:
             status = "AUTO_EXCLUDE"
             exclude_reason = "two_wheeler_or_person_class"
+        elif "very_short_track" in quality_reasons and (
+            "static_like" in quality_reasons or "low_confidence_many" in quality_reasons
+        ):
+            status = "AUTO_EXCLUDE"
+            exclude_reason = "short_static_false_positive"
+        elif "border_short_target" in quality_reasons and "small_area" in quality_reasons:
+            status = "REVIEW_ONLY_IF_UNCERTAIN"
+            review_reason = "border_short_target"
         elif dominant_class == "car" and len(rows) < 50 and area_median < 800 and height_median < 26:
             status = "REVIEW_ONLY_IF_UNCERTAIN"
             review_reason = "small_short_vehicle_like_target"
+        elif "short_track" in quality_reasons and "small_area" in quality_reasons:
+            status = "REVIEW_ONLY_IF_UNCERTAIN"
+            review_reason = "short_small_target"
         report.append(
             {
                 "logical_vehicle_id": logical_id,
@@ -1096,6 +1249,85 @@ def raw_track_ids_for_rows(rows: list[dict]) -> str:
     return "|".join(sorted({row["raw_track_id"] for row in rows}))
 
 
+def build_cross_raw_recovery_review(
+    logical_rows: list[dict],
+    max_gap_frames: int = 60,
+    max_center_distance_per_frame: float = 3.0,
+    max_size_ratio: float = 1.6,
+    min_segment_frames: int = 20,
+) -> list[dict]:
+    by_logical: dict[str, list[dict]] = defaultdict(list)
+    for row in logical_rows:
+        if row.get("association_status") == "accepted":
+            by_logical[row["logical_vehicle_id"]].append(row)
+
+    ordered_by_logical = {
+        logical_id: sorted(rows, key=lambda item: int(float(item["frame_id"])))
+        for logical_id, rows in by_logical.items()
+        if len(rows) >= min_segment_frames
+    }
+    candidates_by_from: dict[str, list[dict]] = defaultdict(list)
+    for from_id, from_rows in sorted(ordered_by_logical.items()):
+        from_raw_ids = {row["raw_track_id"] for row in from_rows}
+        from_last = from_rows[-1]
+        for to_id, to_rows in sorted(ordered_by_logical.items()):
+            if from_id == to_id:
+                continue
+            to_raw_ids = {row["raw_track_id"] for row in to_rows}
+            if from_raw_ids & to_raw_ids:
+                continue
+            to_first = to_rows[0]
+            gap = frame_id(to_first) - frame_id(from_last) - 1
+            if gap < 0 or gap > max_gap_frames:
+                continue
+            center_distance = distance(center(from_last), center(to_first))
+            center_distance_per_frame = center_distance / max(1, gap + 1)
+            ratio = row_size_ratio(from_last, to_first)
+            compatible = class_compatible(dominant_class(from_rows), dominant_class(to_rows))
+            if not compatible:
+                continue
+            if center_distance_per_frame > max_center_distance_per_frame:
+                continue
+            if ratio > max_size_ratio:
+                continue
+            candidates_by_from[from_id].append(
+                {
+                    "from_logical_vehicle_id": from_id,
+                    "to_logical_vehicle_id": to_id,
+                    "from_raw_track_ids": raw_track_ids_for_rows(from_rows),
+                    "to_raw_track_ids": raw_track_ids_for_rows(to_rows),
+                    "from_end_frame": str(frame_id(from_last)),
+                    "to_start_frame": str(frame_id(to_first)),
+                    "gap_frames": str(gap),
+                    "center_distance_px": f"{center_distance:.2f}",
+                    "center_distance_per_frame": f"{center_distance_per_frame:.2f}",
+                    "bbox_size_ratio": f"{ratio:.2f}",
+                    "class_compatible": "yes",
+                    "review_status": "REVIEW_CROSS_RAW_RECOVERY",
+                    "reason": "cross_raw_occlusion_recovery_candidate",
+                }
+            )
+
+    output = []
+    for from_id, candidates in sorted(candidates_by_from.items()):
+        ranked = sorted(
+            candidates,
+            key=lambda row: (
+                float(row["center_distance_per_frame"]),
+                float(row["center_distance_px"]),
+                int(float(row["gap_frames"])),
+                row["to_logical_vehicle_id"],
+            ),
+        )
+        for rank, row in enumerate(ranked, start=1):
+            copy = dict(row)
+            copy["candidate_rank"] = str(rank)
+            if rank > 1:
+                copy["reason"] = f"{copy['reason']}|competing_candidate"
+            output.append(copy)
+    return output
+
+
 def rows_by_int_frame(rows: list[dict]) -> dict[int, dict]:
     grouped: dict[int, list[dict]] = defaultdict(list)
     for row in rows:
@@ -1359,6 +1591,8 @@ def build_logical_vehicle_consistency(
     logical_vehicle_summary = build_logical_summary_from_rows(logical_tracks)
     raw_track_mapping = build_raw_mapping_from_rows(logical_tracks)
     validity_report = build_target_validity_report(logical_tracks)
+    target_quality_report = build_target_quality_report(logical_tracks)
+    cross_raw_recovery_review = build_cross_raw_recovery_review(logical_tracks)
     purity_report = build_identity_purity_report(logical_tracks)
     final_gate = build_final_target_gate(logical_vehicle_summary, validity_report, purity_report)
     logical_tracks = apply_final_gate_to_tracks(logical_tracks, final_gate)
@@ -1378,6 +1612,8 @@ def build_logical_vehicle_consistency(
         raw_track_split_review=raw_split_review,
         risky_accepted_link_review=build_risky_accepted_link_review(association.accepted_links),
         fragment_path_absorption_review=fragment_absorption_review,
+        target_quality_report=target_quality_report,
+        cross_raw_recovery_review=cross_raw_recovery_review,
     )
 
 
@@ -1398,3 +1634,5 @@ def write_consistency_outputs(output_dir: Path, outputs: ConsistencyOutputs) -> 
     write_csv(output_dir / "raw_track_split_review.csv", outputs.raw_track_split_review, RAW_SPLIT_REVIEW_FIELDS)
     write_csv(output_dir / "risky_accepted_link_review.csv", outputs.risky_accepted_link_review, RISKY_LINK_REVIEW_FIELDS)
     write_csv(output_dir / "fragment_path_absorption_review.csv", outputs.fragment_path_absorption_review, FRAGMENT_PATH_ABSORPTION_FIELDS)
+    write_csv(output_dir / "target_quality_report.csv", outputs.target_quality_report, TARGET_QUALITY_FIELDS)
+    write_csv(output_dir / "cross_raw_recovery_review.csv", outputs.cross_raw_recovery_review, CROSS_RAW_RECOVERY_FIELDS)
