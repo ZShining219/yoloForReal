@@ -5,8 +5,7 @@ mot_0003,lv_0003,mot_0003_tl01,455,accepted
 mot_0004,lv_0004,mot_0004_tl01|mot_0004_tl02,243,accepted
 mot_0006,lv_0005,mot_0006_tl01,280,accepted
 mot_0007,lv_0006,mot_0007_tl01|mot_0007_tl02,384,accepted
-mot_0008,lv_0007,mot_0008_tl01|mot_0008_tl02,173,accepted
-mot_0008,lv_0012,mot_0008_tl03,20,accepted
+mot_0008,lv_0007,mot_0008_tl01|mot_0008_tl02|mot_0008_tl03,193,accepted
 mot_0009,lv_0008,mot_0009_tl01|mot_0009_tl02|mot_0009_tl03|mot_0009_tl04|mot_0009_tl05|mot_0009_tl06|mot_0009_tl07|mot_0009_tl08|mot_0009_tl09|mot_0009_tl10|mot_0009_tl11,330,accepted
 mot_0010,lv_0009,mot_0010_tl01|mot_0010_tl02,1999,accepted
 mot_0011,lv_0010,mot_0011_tl01|mot_0011_tl02|mot_0011_tl03|mot_0011_tl04|mot_0011_tl05|mot_0011_tl06|mot_0011_tl07|mot_0011_tl08|mot_0011_tl09|mot_0011_tl10,1814,accepted
@@ -25,9 +24,8 @@ mot_0402,lv_0023,mot_0402_tl01,40,accepted
 mot_0420,lv_0024,mot_0420_tl01|mot_0420_tl02|mot_0420_tl03|mot_0420_tl04|mot_0420_tl05,30,accepted
 mot_0421,lv_0025,mot_0421_tl01,4,accepted
 mot_0421,lv_0027,mot_0421_tl02,1,accepted
-mot_0424,lv_0024,mot_0424_tl02|mot_0424_tl03|mot_0424_tl04|mot_0424_tl05|mot_0424_tl06|mot_0424_tl07,166,accepted
+mot_0424,lv_0024,mot_0424_tl02|mot_0424_tl03|mot_0424_tl04|mot_0424_tl05|mot_0424_tl06|mot_0424_tl07|mot_0424_tl08,571,accepted
 mot_0424,lv_0026,mot_0424_tl01,3,accepted
-mot_0424,lv_0037,mot_0424_tl08,405,accepted
 mot_0488,lv_0030,mot_0488_tl01|mot_0488_tl02|mot_0488_tl03|mot_0488_tl04|mot_0488_tl05,81,accepted
 mot_0500,lv_0031,mot_0500_tl01,14,accepted
 mot_0500,lv_0033,mot_0500_tl02,33,accepted
@@ -38,7 +36,6 @@ mot_0570,lv_0036,mot_0570_tl01|mot_0570_tl02,62,accepted
 mot_0580,lv_0038,mot_0580_tl01,405,accepted
 mot_0588,lv_0039,mot_0588_tl01|mot_0588_tl02|mot_0588_tl03|mot_0588_tl04,48,accepted
 mot_0621,lv_0040,mot_0621_tl01|mot_0621_tl02|mot_0621_tl03,288,accepted
-mot_0622,lv_0041,mot_0622_tl01|mot_0622_tl02|mot_0622_tl03|mot_0622_tl04|mot_0622_tl05|mot_0622_tl06|mot_0622_tl07|mot_0622_tl08|mot_0622_tl09|mot_0622_tl10|mot_0622_tl11|mot_0622_tl12|mot_0622_tl13|mot_0622_tl14|mot_0622_tl15|mot_0622_tl16|mot_0622_tl17|mot_0622_tl18|mot_0622_tl19,94,accepted
-mot_0622,lv_0043,mot_0622_tl20|mot_0622_tl21|mot_0622_tl22|mot_0622_tl23|mot_0622_tl24|mot_0622_tl25|mot_0622_tl26,82,accepted
+mot_0622,lv_0041,mot_0622_tl01|mot_0622_tl02|mot_0622_tl03|mot_0622_tl04|mot_0622_tl05|mot_0622_tl06|mot_0622_tl07|mot_0622_tl08|mot_0622_tl09|mot_0622_tl10|mot_0622_tl11|mot_0622_tl12|mot_0622_tl13|mot_0622_tl14|mot_0622_tl15|mot_0622_tl16|mot_0622_tl17|mot_0622_tl18|mot_0622_tl19|mot_0622_tl20|mot_0622_tl21|mot_0622_tl22|mot_0622_tl23|mot_0622_tl24|mot_0622_tl25|mot_0622_tl26,176,accepted
 mot_0622,lv_0044,mot_0622_tl27,1,accepted
 mot_0670,lv_0042,mot_0670_tl01|mot_0670_tl02,77,accepted
