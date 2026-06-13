@@ -1,4 +1,4 @@
-from_logical_vehicle_id,to_logical_vehicle_id,from_raw_track_ids,to_raw_track_ids,from_end_frame,to_start_frame,gap_frames,center_distance_px,center_distance_per_frame,bbox_size_ratio,class_compatible,candidate_rank,review_status,reason
-lv_0021,lv_0036,mot_0392,mot_0570,1548,1588,39,116.14,2.90,1.37,yes,1,REVIEW_CROSS_RAW_RECOVERY,cross_raw_occlusion_recovery_candidate
-lv_0039,lv_0040,mot_0588,mot_0621,1670,1710,39,35.67,0.89,1.17,yes,1,REVIEW_CROSS_RAW_RECOVERY,cross_raw_occlusion_recovery_candidate
-lv_0039,lv_0041,mot_0588,mot_0622,1670,1711,40,67.38,1.64,1.30,yes,2,REVIEW_CROSS_RAW_RECOVERY,cross_raw_occlusion_recovery_candidate|competing_candidate
+from_logical_vehicle_id,to_logical_vehicle_id,from_raw_track_ids,to_raw_track_ids,from_end_frame,to_start_frame,gap_frames,center_distance_px,center_distance_per_frame,bbox_size_ratio,class_compatible,candidate_rank,competing_candidate_count,best_candidate_margin,review_status,reason
+lv_0021,lv_0036,mot_0392,mot_0570,1548,1588,39,116.14,2.90,1.37,yes,1,1,0.00,REVIEW_CROSS_RAW_RECOVERY,cross_raw_occlusion_recovery_candidate
+lv_0039,lv_0040,mot_0588,mot_0621,1670,1710,39,35.67,0.89,1.17,yes,1,2,0.00,REVIEW_CROSS_RAW_RECOVERY,cross_raw_occlusion_recovery_candidate
+lv_0039,lv_0041,mot_0588,mot_0622,1670,1711,40,67.38,1.64,1.30,yes,2,2,0.75,REVIEW_CROSS_RAW_RECOVERY,cross_raw_occlusion_recovery_candidate|competing_candidate
